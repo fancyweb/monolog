@@ -14,6 +14,7 @@ namespace Monolog\Handler;
 use Monolog\Formatter\LineFormatter;
 use Monolog\Formatter\FormatterInterface;
 use Monolog\Utils;
+use Monolog\LogRecord;
 
 /**
  * Handler sending logs to browser's javascript console with no browser extension required
@@ -46,7 +47,7 @@ class BrowserConsoleHandler extends AbstractProcessingHandler
     /**
      * {@inheritDoc}
      */
-    protected function write(array $record): void
+    protected function write(LogRecord $record): void
     {
         // Accumulate records
         static::$records[] = $record;

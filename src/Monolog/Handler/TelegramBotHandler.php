@@ -13,6 +13,7 @@ namespace Monolog\Handler;
 
 use RuntimeException;
 use Monolog\Logger;
+use Monolog\LogRecord;
 
 /**
  * Handler send logs to Telegram using Telegram Bot API.
@@ -157,7 +158,7 @@ class TelegramBotHandler extends AbstractProcessingHandler
     /**
      * @inheritDoc
      */
-    protected function write(array $record): void
+    protected function write(LogRecord $record): void
     {
         $this->send($record['formatted']);
     }

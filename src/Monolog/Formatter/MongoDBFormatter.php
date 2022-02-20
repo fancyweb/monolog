@@ -13,6 +13,7 @@ namespace Monolog\Formatter;
 
 use MongoDB\BSON\UTCDateTime;
 use Monolog\Utils;
+use Monolog\LogRecord;
 
 /**
  * Formats a record for use with the MongoDBHandler.
@@ -45,7 +46,7 @@ class MongoDBFormatter implements FormatterInterface
      *
      * @return mixed[]
      */
-    public function format(array $record): array
+    public function format(LogRecord $record): array
     {
         /** @var mixed[] $res */
         $res = $this->formatArray($record);

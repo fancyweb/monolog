@@ -13,6 +13,7 @@ namespace Monolog;
 
 use DateTimeZone;
 use Monolog\Handler\HandlerInterface;
+use Monolog\Processor\ProcessorInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\InvalidArgumentException;
 use Psr\Log\LogLevel;
@@ -29,7 +30,6 @@ use Stringable;
  *
  * @phpstan-type Level Logger::DEBUG|Logger::INFO|Logger::NOTICE|Logger::WARNING|Logger::ERROR|Logger::CRITICAL|Logger::ALERT|Logger::EMERGENCY
  * @phpstan-type LevelName 'DEBUG'|'INFO'|'NOTICE'|'WARNING'|'ERROR'|'CRITICAL'|'ALERT'|'EMERGENCY'
- * @phpstan-type Record array{message: string, context: mixed[], level: Level, level_name: LevelName, channel: string, datetime: \DateTimeImmutable, extra: mixed[]}
  */
 class Logger implements LoggerInterface, ResettableInterface
 {
@@ -128,7 +128,7 @@ class Logger implements LoggerInterface, ResettableInterface
      *
      * To process records of a single handler instead, add the processor on that specific handler
      *
-     * @var callable[]
+     * @var array<(callable(LogRecord): LogRecord)|ProcessorInterface>
      */
     protected $processors;
 
@@ -148,12 +148,12 @@ class Logger implements LoggerInterface, ResettableInterface
     protected $exceptionHandler;
 
     /**
-     * @psalm-param array<callable(array): array> $processors
-     *
      * @param string             $name       The logging channel, a simple descriptive name that is attached to all log records
      * @param HandlerInterface[] $handlers   Optional stack of handlers, the first one in the array is called first, etc.
      * @param callable[]         $processors Optional array of processors
      * @param DateTimeZone|null  $timezone   Optional timezone, if not provided date_default_timezone_get() will be used
+     *
+     * @phpstan-param array<(callable(LogRecord): LogRecord)|ProcessorInterface> $processors
      */
     public function __construct(string $name, array $handlers = [], array $processors = [], ?DateTimeZone $timezone = null)
     {
@@ -290,31 +290,29 @@ class Logger implements LoggerInterface, ResettableInterface
     public function addRecord(int $level, string $message, array $context = []): bool
     {
         $offset = 0;
-        $record = null;
+        $recordInitialized = count($this->processors) === 0;
+
+        $record = new LogRecord(
+            message: $message,
+            context: $context,
+            level: $level,
+            channel: $this->name,
+            datetime: new DateTimeImmutable($this->microsecondTimestamps, $this->timezone),
+            extra: [],
+        );
 
         foreach ($this->handlers as $handler) {
-            if (null === $record) {
-                // skip creating the record as long as no handler is going to handle it
-                if (!$handler->isHandling(['level' => $level])) {
+            if (false === $recordInitialized) {
+                // skip initializing the record as long as no handler is going to handle it
+                if (!$handler->isHandling($record)) {
                     continue;
                 }
-
-                $levelName = static::getLevelName($level);
-
-                $record = [
-                    'message' => $message,
-                    'context' => $context,
-                    'level' => $level,
-                    'level_name' => $levelName,
-                    'channel' => $this->name,
-                    'datetime' => new DateTimeImmutable($this->microsecondTimestamps, $this->timezone),
-                    'extra' => [],
-                ];
 
                 try {
                     foreach ($this->processors as $processor) {
                         $record = $processor($record);
                     }
+                    $recordInitialized = true;
                 } catch (Throwable $e) {
                     $this->handleException($e, $record);
 
@@ -322,7 +320,7 @@ class Logger implements LoggerInterface, ResettableInterface
                 }
             }
 
-            // once the record exists, send it to all handlers as long as the bubbling chain is not interrupted
+            // once the record is initialized, send it to all handlers as long as the bubbling chain is not interrupted
             try {
                 if (true === $handler->handle($record)) {
                     break;
@@ -448,9 +446,12 @@ class Logger implements LoggerInterface, ResettableInterface
      */
     public function isHandling(int $level): bool
     {
-        $record = [
-            'level' => $level,
-        ];
+        $record = new LogRecord(
+            datetime: new DateTimeImmutable($this->microsecondTimestamps, $this->timezone),
+            channel: $this->name,
+            message: '',
+            level: $level,
+        );
 
         foreach ($this->handlers as $handler) {
             if ($handler->isHandling($record)) {
@@ -489,7 +490,7 @@ class Logger implements LoggerInterface, ResettableInterface
      *
      * @phpstan-param Level|LevelName|LogLevel::* $level
      */
-    public function log($level, $message, array $context = []): void
+    public function log($level, string|\Stringable $message, array $context = []): void
     {
         if (!is_int($level) && !is_string($level)) {
             throw new \InvalidArgumentException('$level is expected to be a string or int');
@@ -508,7 +509,7 @@ class Logger implements LoggerInterface, ResettableInterface
      * @param string|Stringable $message The log message
      * @param mixed[]           $context The log context
      */
-    public function debug($message, array $context = []): void
+    public function debug(string|\Stringable $message, array $context = []): void
     {
         $this->addRecord(static::DEBUG, (string) $message, $context);
     }
@@ -521,7 +522,7 @@ class Logger implements LoggerInterface, ResettableInterface
      * @param string|Stringable $message The log message
      * @param mixed[]           $context The log context
      */
-    public function info($message, array $context = []): void
+    public function info(string|\Stringable $message, array $context = []): void
     {
         $this->addRecord(static::INFO, (string) $message, $context);
     }
@@ -534,7 +535,7 @@ class Logger implements LoggerInterface, ResettableInterface
      * @param string|Stringable $message The log message
      * @param mixed[]           $context The log context
      */
-    public function notice($message, array $context = []): void
+    public function notice(string|\Stringable $message, array $context = []): void
     {
         $this->addRecord(static::NOTICE, (string) $message, $context);
     }
@@ -547,7 +548,7 @@ class Logger implements LoggerInterface, ResettableInterface
      * @param string|Stringable $message The log message
      * @param mixed[]           $context The log context
      */
-    public function warning($message, array $context = []): void
+    public function warning(string|\Stringable $message, array $context = []): void
     {
         $this->addRecord(static::WARNING, (string) $message, $context);
     }
@@ -560,7 +561,7 @@ class Logger implements LoggerInterface, ResettableInterface
      * @param string|Stringable $message The log message
      * @param mixed[]           $context The log context
      */
-    public function error($message, array $context = []): void
+    public function error(string|\Stringable $message, array $context = []): void
     {
         $this->addRecord(static::ERROR, (string) $message, $context);
     }
@@ -573,7 +574,7 @@ class Logger implements LoggerInterface, ResettableInterface
      * @param string|Stringable $message The log message
      * @param mixed[]           $context The log context
      */
-    public function critical($message, array $context = []): void
+    public function critical(string|\Stringable $message, array $context = []): void
     {
         $this->addRecord(static::CRITICAL, (string) $message, $context);
     }
@@ -586,7 +587,7 @@ class Logger implements LoggerInterface, ResettableInterface
      * @param string|Stringable $message The log message
      * @param mixed[]           $context The log context
      */
-    public function alert($message, array $context = []): void
+    public function alert(string|\Stringable $message, array $context = []): void
     {
         $this->addRecord(static::ALERT, (string) $message, $context);
     }
@@ -599,7 +600,7 @@ class Logger implements LoggerInterface, ResettableInterface
      * @param string|Stringable $message The log message
      * @param mixed[]           $context The log context
      */
-    public function emergency($message, array $context = []): void
+    public function emergency(string|\Stringable $message, array $context = []): void
     {
         $this->addRecord(static::EMERGENCY, (string) $message, $context);
     }
@@ -625,11 +626,8 @@ class Logger implements LoggerInterface, ResettableInterface
     /**
      * Delegates exception management to the custom exception handler,
      * or throws the exception if no custom handler is set.
-     *
-     * @param array $record
-     * @phpstan-param Record $record
      */
-    protected function handleException(Throwable $e, array $record): void
+    protected function handleException(Throwable $e, LogRecord $record): void
     {
         if (!$this->exceptionHandler) {
             throw $e;
